@@ -610,7 +610,7 @@ class Message:
         pass
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     ko = QQ(1216789457, "12589qq")
     ko.login()
     ko.watch_dog()
