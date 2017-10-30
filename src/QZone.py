@@ -14,46 +14,123 @@ normal_header = {"User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:56.0)
 
 
 class QQ:
-    def __init__(self, qq_number, qq_password):
+    def __init__(self, qq_number=None, qq_password=None):
         self.qq_number = qq_number
         self.qq_password = qq_password
-        self.login_sig = None
         self.g_tk = None
         self.qzonetoken = None
         self.qq_cookie = http.cookiejar.CookieJar()
         my_handler = urllib.request.HTTPCookieProcessor(self.qq_cookie)
         self.opener = urllib.request.build_opener(my_handler)
 
-    def login(self):
-        self.login_sig = self.__get_login_sig()
-        verify_code = self.__get_verify_code()
+    def login_by_password(self):
+        login_sig = self.__get_login_sig()
+        result=self.__get_verify_code(login_sig=login_sig)
+        verify_code = result["verify_code"]
+        ptvf_session=result["ptvf_session"]
+        v=1
+        if ptvf_session is None:
+            v=0
+            ptvf_session = self.__get_ptvf_session()
         # Request login
         pt_login = urllib.request.Request(
             url="https://ssl.ptlogin2.qq.com/login?u=" + str(self.qq_number) +
-                "&verifycode=" + self.verify_code +
-                "&pt_vcode_v1=0"
-                "&pt_verifysession_v1=" + self.__get_ptvf_session() +
+                "&verifycode=" + verify_code +
+                "&pt_vcode_v1="+str(v)+
+                "&pt_verifysession_v1=" + ptvf_session +
                 "&p=" + self.__get_p(verify_code) +
                 "&pt_randsalt=2&pt_jstoken=3670018369"
                 "&u1=https%3A%2F%2Fqzs.qq.com%2Fqzone%2Fv5%2Floginsucc.html%3Fpara%3Dizone"
                 "&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052"
                 "&action=4-3-1508039351070&js_ver=10230&js_type=1"
-                "&login_sig=" + self.login_sig +
+                "&login_sig=" + login_sig +
                 "&pt_uistyle=40&aid=549000912&daid=5&has_onekey=1&",
             headers=normal_header, method="GET")
-        text = self.opener.open(pt_login).read().decode()
-        return_value = re.search("ptuiCB\('([0-9])'", text).group(1)
-        if return_value != "0":
-            print("%s(%s)" % (re.search("'([^0-9,]+)'", text).group(1), return_value))
+        res = self.opener.open(pt_login).read().decode()
+        print(res)
+        result = re.match("ptuiCB\('([^']*)','[^']*','([^']*)','[^']*','([^']*)', '(.*)'\)", res)
+        code = result.group(1)
+        success_url = result.group(2)
+        info = result.group(3)
+        username = result.group(4)
+        if code != "0":
+            print("%s(%s)" % (info, code))
             exit(255)
         else:
-            print("%s登录成功!(0)" % (re.search("'([^']*)'\)", text).group(1)))
-        pattern = re.compile("'(http[^']+)'")
-        urls = pattern.search(text).group(1)
-        self.opener.open(urls)
+            print("%s %s(%s)" % (username,info,code))
+        self.opener.open(success_url)
         self.opener.open("https://qzs.qq.com/qzone/v5/loginsucc.html?para=izone")
         self.g_tk = self.__get_g_tk()
         self.qzonetoken = self.__get_qzonetoken(self.qq_number)
+
+    def login_by_qrcode(self):
+        self.download_qrcode()
+        for i in range(20):
+            code,success_url,info,username=self.check_qrcode()
+            if code=="65":
+                print("%s(%s)"%(info,code))
+                while True:
+                    select=input("重新下载(r)/退出(e):")
+                    if select=='e':
+                        exit(0)
+                    elif select=='r':
+                        self.download_qrcode()
+                        break
+            elif code=='66':
+                print("%s(%s)"%(info,code))
+                time.sleep(3)
+            elif code=="67":
+                print("%s(%s)"%(info,code))
+                time.sleep(3)
+            elif code=="0":
+                print("%s(%s)"%(info,code))
+                self.qq_number=int(re.search(r'&uin=([0-9]+)',success_url).group(1))
+                self.opener.open(success_url)
+                self.opener.open("https://qzs.qq.com/qzone/v5/loginsucc.html?para=izone")
+                self.g_tk = self.__get_g_tk()
+                self.qzonetoken = self.__get_qzonetoken(self.qq_number)
+                break
+            else:
+                print("Unknown code!!")
+                exit(0)
+
+    def download_qrcode(self):
+        req=urllib.request.Request(
+            url="https://ssl.ptlogin2.qq.com/ptqrshow?appid=549000912&e=2&l=M&s=3&d=72&v=4"
+                "&t="+str(random.random())+
+                "&daid=5&pt_3rd_aid=0",
+            headers=normal_header,
+        )
+        res=self.opener.open(req)
+        qrcode=open("qrcode.png",'wb')
+        qrcode.write(res.read())
+        qrcode.close()
+        print("二维码下载完成,请前去扫描(qrcode.png)")
+
+    def check_qrcode(self):
+        qrsig=None
+        for i in self.qq_cookie:
+            if i.name=='qrsig':
+                qrsig=i.value
+                break
+        if qrsig is None:
+            print("QR_Code识别码没有找到,需要重新下载")
+            raise RuntimeError
+        req=urllib.request.Request(
+            url="https://ssl.ptlogin2.qq.com/ptqrlogin"
+                "?u1=https%3A%2F%2Fqzs.qq.com%2Fqzone%2Fv5%2Floginsucc.html%3Fpara%3Dizone"
+                "&ptqrtoken="+str(QQ.__hash33(qrsig))+
+                "&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052"
+                "&action=0-0-1509338784922"
+                "&js_ver=10231&js_type=1&login_sig=&pt_uistyle=40&aid=549000912&daid=5&"
+        )
+        res=self.opener.open(req).read().decode()
+        result = re.match("ptuiCB\('([^']*)','[^']*','([^']*)','[^']*','([^']*)', '(.*)'\)", res)
+        code=result.group(1)
+        success_url=result.group(2)
+        info=result.group(3)
+        username=result.group(4)
+        return code,success_url,info,username
 
     def logout(self):
         # Three arguments which ara needed
@@ -337,7 +414,6 @@ class QQ:
             headers=headers, method="POST")
         self.opener.open(unlike_url, data=data)
 
-
     def auto_reply(self, offset=0, count=1):
         """
         回复从最近数第offset条开始，回复count条
@@ -375,15 +451,13 @@ class QQ:
                           this_comment_uin=comment_last.comment_uin,
                           content=answer)
 
-    def watch_dog(self,times=10,sleep_time=5):
+    def watch_dog(self, times=10, sleep_time=5):
         for i in range(times):
             count = self.get_feeds_count()
-            print(count)
+            # print(count)
             if count > 0:
                 self.auto_reply(0, count=count)
-            time.sleep(seconds=sleep_time)
-
-
+            time.sleep(sleep_time)
 
     @staticmethod
     def __extract_mid_callback(text):
@@ -399,20 +473,6 @@ class QQ:
         for i in range(len(p_skey)):
             num += (num << 5) + ord(p_skey[i])
         return num & 2147483647
-
-    @staticmethod
-    def __hash33(o):
-        t = 0
-        for e in range(len(o)):
-            t += (t << 5) + ord(o[e])
-        return 2147483647 & t
-
-    @staticmethod
-    def __time33(o):
-        t = 0
-        for e in range(len(o)):
-            t = 33 * t + ord(o[e])
-        return t % 4294967296
 
     def __get_login_sig(self):
         login_sign_url = urllib.request.Request(
@@ -432,21 +492,6 @@ class QQ:
             if i.name == "pt_login_sig":
                 return i.value
         raise RuntimeError("pt_login_sig Not Found")
-
-    def __get_verify_code(self):
-        check_req = urllib.request.Request(
-            url="https://ssl.ptlogin2.qq.com/check?regmaster="
-                "&pt_tea=2&pt_vcode=1&uin=" + str(self.qq_number) +
-                "&appid=549000912&js_ver=10230&js_type=1"
-                "&login_sig=" + self.login_sig +
-                "&u1=https%3A%2F%2Fqzs.qq.com%2Fqzone%2Fv5%2Floginsucc.html%3Fpara%3Dizone"
-                "&r=" + str(random.random()) +
-                "&pt_uistyle=40&pt_jstoken=3670018369", headers=normal_header, method="GET")
-        content = self.opener.open(check_req).read()
-        if content[14] != 0x30:
-            raise RuntimeError("Need Verification!")
-        self.verify_code = content[18:22].decode()
-        return self.verify_code
 
     def __get_ptvf_session(self):
         # Get ptvfsession in cookie
@@ -548,6 +593,141 @@ class QQ:
             print("这不是一个comment html")
             raise
 
+    # #####################验证码部分##############################################################
+    def __get_verify_code(self,login_sig):
+        check_req = urllib.request.Request(
+            url="https://ssl.ptlogin2.qq.com/check?regmaster="
+                "&pt_tea=2&pt_vcode=1&uin=" + str(self.qq_number) +
+                "&appid=549000912&js_ver=10230&js_type=1"
+                "&login_sig=" + login_sig +
+                "&u1=https%3A%2F%2Fqzs.qq.com%2Fqzone%2Fv5%2Floginsucc.html%3Fpara%3Dizone"
+                "&r=" + str(random.random()) +
+                "&pt_uistyle=40&pt_jstoken=3670018369", headers=normal_header, method="GET")
+        content = self.opener.open(check_req).read().decode()
+        print(content)
+        if content[14] == '0':
+            verify_code = content[18:22]
+            return {"verify_code":verify_code,"ptvf_session":None}
+        elif content[14] == '1':
+            cap_cd = content[18:74]
+            return self.__get_captcha(cap_cd)
+        else:
+            print("Check未知")
+            exit(-1)
+
+    def __get_captcha(self,cap_cd):
+        sess=self.__cap_union_pre(cap_cd=cap_cd)
+        vsig=self.__cap_union_get_sig(sess=sess,cap_cd=cap_cd)
+        ans=self.__cap_union_get_cap(cap_cd=cap_cd, sess=sess, vsig=vsig)
+        result=self.__cap_union_new_verify(sess=sess, cap_cd=cap_cd, vsign=vsig, ans=ans)
+        return result
+
+    def __cap_union_pre(self, cap_cd):
+        req = urllib.request.Request(
+            url="https://ssl.captcha.qq.com/cap_union_prehandle"
+                "?aid=549000912"
+                "&asig=&captype=&protocol=https"
+                "&clientype=2&disturblevel=&apptype=2&curenv=inner"
+                "&ua=TW96aWxsYS81LjAgKFgxMTsgVWJ1bnR1OyBMaW51eCB4ODZfNjQ7IHJ2OjU2LjApIEdlY2tvLzIwMTAwMTAxIEZpcmVmb3gvNTYuMA=="
+                "&uid=" + str(self.qq_number) +
+                "&cap_cd=" + cap_cd +
+                "&lang=2052&callback=_aq_972838", headers=normal_header)
+        content = self.opener.open(req).read().decode()[11:-1]
+        djs= demjson.decode(content)
+        print(djs["capclass"])
+        sess = djs["sess"]
+        return sess
+
+    def __cap_union_get_sig(self, sess, cap_cd):
+        req = urllib.request.Request(
+            url="https://ssl.captcha.qq.com/cap_union_new_getsig?aid=549000912&asig="
+                "&captype=&protocol=https&clientype=2&disturblevel=&apptype=2"
+                "&curenv=inner"
+                "&ua=TW96aWxsYS81LjAgKFgxMTsgVWJ1bnR1OyBMaW51eCB4ODZfNjQ7IHJ2OjU2LjApIEdlY2tvLzIwMTAwMTAxIEZpcmVmb3gvNTYuMA=="
+                "&sess=" + sess +
+                "&theme=&noBorder=noborder&fb=1&showtype=embed"
+                "&uid=" + str(self.qq_number) +
+                "&cap_cd=" + cap_cd +
+                "&lang=2052&rnd=72747"
+                "&rand=" + str(random.random()) +
+                "ischartype=1"
+        )
+        content = self.opener.open(req).read().decode()
+        vsig = demjson.decode(content)["vsig"]
+        return vsig
+
+    def __cap_union_get_cap(self, cap_cd, sess, vsig):
+        req = urllib.request.Request(
+            url="https://ssl.captcha.qq.com/cap_union_new_getcapbysig"
+                "?aid=549000912&asig=&captype=&protocol=https&clientype=2&disturblevel="
+                "&apptype=2&curenv=inner"
+                "&ua=TW96aWxsYS81LjAgKFgxMTsgVWJ1bnR1OyBMaW51eCB4ODZfNjQ7IHJ2OjU2LjApIEdlY2tvLzIwMTAwMTAxIEZpcmVmb3gvNTYuMA=="
+                "&sess=" + sess +
+                "&theme=&noBorder=noborder&fb=1&showtype=embed"
+                "&uid=" + str(self.qq_number) +
+                "&cap_cd=" + cap_cd +
+                "&lang=2052&rnd=72747"
+                "&rand=" + str(random.random()) +
+                "&vsig=" + vsig +
+                "&ischartype=1"
+        )
+        verify_code_file = open("VC.jpeg", 'wb')
+        content = self.opener.open(req).read()
+        verify_code_file.write(content)
+        verify_code_file.close()
+        print("验证码文件已经下载完成")
+        ans = input("输入验证码:")
+        return ans
+
+    def __cap_union_new_verify(self, sess, cap_cd, vsign,ans):
+        data = urllib.parse.urlencode({
+            "aid": 549000912, "asig": "","captype": "", "protocol": "https",
+            "clientype": 2, "disturblevel": "", "apptype": 2,"curenv": "inner",
+            "ua": "TW96aWxsYS81LjAgKFgxMTsgVWJ1bnR1OyBMaW51eCB4ODZfNjQ7IHJ2OjU2LjApIEdlY2tvLzIwMTAwMTAxIEZpcmVmb3gvNTYuMA",
+            "sess": sess, "theme": "", "noBorder": "noborder",
+            "fb": 1,
+            "showtype": "embed",
+            "uid": self.qq_number,
+            "cap_cd": cap_cd,
+            "lang": 2052,
+            "rnd": 254414,
+            "subcapclass": 0,
+            "vsig": vsign,
+            "cdata": 1,
+            "ababec": "OD6q9t0AraWJf+dtq0j8Vjbmr8oShzAnoHh2LmL2bRo6GMZLH49b2ScYxUBYxYNZwJ5zGP2Vgknv7WdS1EUyMTONzAXX8hEJVcaKhwz6oLl7wE/Ohwk5qlm5e8zR5V48zGjcNqOodGDA+ZR9oCS9y2FKw0LSol+RprOs6hsLApPTHbHd007Ybh5eFY2SZQZAVdvUO9D1scukhLp/F2ny4boVNi6dBVAjEBPflf/FZ9ao6+ArwIA+AyxQEpzZXOe6ttUTJ5r3qISQSIrbsh7TA53qXDNA+v45ZAqIOkfD3psvsbl6TPKRmfndptmYsyQW/R8OMNuydv/wcx/p5DejeXt5YzDkl0eguIIvPDAeEUfxi0567DH+6FnnlD+Icrj5Xk2x2j+4l11c26aiBtPdzXYyEY6NvrYVdYDdDjBfDB4wS54kyaHqIEqy1uVqn7Pg6MtHnymx7P13wBfwbwFmgEAas4780ZrFuvfUpoodK0+W0nZmVWMtEqz1pUiEPMNYj+I3pqNk4DwK7As8MgW6TKc5tw5QDqpRBVR9gHowsbwjVQDdARG4Mj+A6ecF8RlEKOl1MDqmyEc3RVvPIorV119CXj+UHWfdDHw3fHveIIHsPaki/w1/cizDhDgmZ45aAcP40fn7R25QXhn1Nkn3LOmFAnpBCBDn9GVYeeuEoYoqiCosirbcU/DHkDrIDK55HTpR7BcmVx89jyL/eBRHIHotc1uAP6W7N8mhopN1xrzkCwADmoFo3SRroE/uwlSUQBM48JpAn88+8QIZjI8HgLcIK4IU1x2ZbL8E/pkYLQFxRXfcZCgyIKm+6gEc8fPO7rtsiDwI94epEmKZwFmrxAa6Fy/cuW3TqL+ynVLfvWC8b0FrimoTjg9KjOYYUZ2BsLldt5SIRnw1QIlnJL3pNW2QfdjZiF62q4pn7qSirYtgMhi1/xNoHRvEgjDwmQlwWheSfLAvZEPG/SzQ1iLcfpeNMx9VN6yDGVBDZP9shqA3gLj9Xs0T+M/u+UidNWNrdGicVcJ8SqZwRwejPo25BR7xZoLEY3cArvTWsl4pZ0nVifOvGuPkL2EpMtiMDWIWJsehY0GOqH/im2ZXoXdTWmplFl4/Z9BC/EAfC0MD5gKU0T56DP21PDtEJrwHP+9jBqmkmoDgFSe+64d8r7HwaiYGIbmhAAkvPxkD+/e9cZ5OBIZr+8SvCNTV0bnyCEMsJZMhbub9hLNLULWfRd0U18cVfHntHtmexDY701xiyjmj3NFw1SML03AHwypjND/bLCP52ke0/vttpOa2Pot9svhYJphFXIVMFGIucTH26gMxLFCJehNr+D7wD/QaKy1yDyalB6av/5Ytjmj+5m183sxt3IiZ25tokCkRtKcf/fr9ldkucdZ4sAGv5jU8nmC6re5/36J6nQwPeR+R+50WDExnXomtomEsg0cvD+QVWYCII+zXDkaBU1i+yCA4zc9P+uZ0C4hdXk3k7HIQiN4PhRn0zraMJjX4DMWKvASUbmh02tleQYqM4oN+LPGVOKVR2RY3wL535O/io+NmZNnJrH9FrAv1/wGRuyAoiRt55vgjMAeG/GIFCsSy3qexMAt+oa+4CG59mue19cpJc43xiMmiLjGOk4TNFDfmhcBL/FhIUz0GeLUSR2kZr24wjHlE2mMpYcJeAOakgjkNAY3Ylg==",
+            "websig": "6da43eaf0b90d19b78bd52445b2c3cdc5a00e99a623b663400838da968206c353cbcf03100b1d773c3281539548637e22c4d9d6dcd946228e3a92ef4c3cf1e17",
+            "ans": ans,
+            "tlg": 1
+        }).encode(encoding='utf-8')
+        req = urllib.request.Request(
+            url="https://ssl.captcha.qq.com/cap_union_new_verify"
+                "?random=" + str(random.randint(0, 2147483647)),
+            headers=normal_header,
+            data=data
+        )
+        content=self.opener.open(req).read().decode()
+        #print(content)
+        djs=demjson.decode(content)
+        if djs["errMessage"] !="OK":
+            print("验证码错误")
+            exit(-1)
+        return {"verify_code":djs["randstr"],"ptvf_session":djs["ticket"]}
+
+    # ####################工具函数部分#############################################################
+    @staticmethod
+    def __hash33(o):
+        t = 0
+        for e in range(len(o)):
+            t += (t << 5) + ord(o[e])
+        return 2147483647 & t
+
+    @staticmethod
+    def __time33(o):
+        t = 0
+        for e in range(len(o)):
+            t = 33 * t + ord(o[e])
+        return t % 4294967296
+
 
 class Comment:
     """
@@ -611,7 +791,22 @@ class Message:
 
 
 if __name__ == "__main__":
-    ko = QQ(1216789457, "12589qq")
-    ko.login()
-    ko.watch_dog()
-    ko.logout()
+    ko=None
+    way=input("使用二维码(q)/密码(p)登录?：")
+    if way=='q':
+        ko=QQ()
+        ko.login_by_qrcode()
+    elif way=='p':
+        qq_number=input("请输入QQ号：")
+        qq_password=input("请输入密码：")
+        ko=QQ(qq_number=qq_number,qq_password=qq_password)
+        ko.login_by_password()
+    else:
+        print("输入错误.即将退出")
+        time.sleep(3)
+        exit(0)
+    if ko is None:
+        print("致命错误.即将退出")
+        exit(0)
+    ko.watch_dog(times=50,sleep_time=5)
+
