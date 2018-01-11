@@ -157,6 +157,7 @@ class QQ:
         print("安全从%s退出(%s)" % (ret.group(2), ret.group(1)))
 
     def feed(self, qq, start, count):
+        #获取qq的从第start条开始的count条feed
         say = urllib.request.Request(
             "https://h5.qzone.qq.com/proxy/domain/ic2.qzone.qq.com/cgi-bin/feeds/feeds_html_act_all"
             "?uin=" + str(self.qq_number) +
@@ -185,6 +186,8 @@ class QQ:
         return self.opener.open(req).read().decode().strip()[10:-2]
 
     def add_comment(self, qq, topic_id, content):
+        #给qq的topic_id标识的说说增加评论content
+        #topic_id可以从说说列表获取
         headers = {
             "Host": "h5.qzone.qq.com",
             "Accept-Language": "en-US,en;q=0.5",
@@ -220,6 +223,7 @@ class QQ:
         self.opener.open(req, data=data)
 
     def del_comment(self, qq, topic_id, comment_id):
+        #删除qq的topic_id标识的说说的comment_id标识的评论
         headers = {
             "Host": "h5.qzone.qq.com",
             "Accept-Language": "en-US,en;q=0.5",
@@ -257,6 +261,9 @@ class QQ:
         return ret_json["message"] + "(" + str(ret_json["code"]) + ")"
 
     def add_reply(self, host_uin, topic_id, comment_id, comment_uin, content):
+        #回复host_uin的topic_id的说说的comment_id的评论
+        #at此人QQ为comment_uin的人
+        #回复内容为content
         headers = {
             "Host": "h5.qzone.qq.com",
             "Accept-Language": "en-US,en;q=0.5",
@@ -298,8 +305,8 @@ class QQ:
 
     def get_feeds_count(self):
         """
-        :return: myFeeds_new_cnt, the number of new feeds about me
-        res is a json like string.
+        取得和自己有关的一些数据，
+        response是个这样的JSON字符串
         {
             code:'0',
             subcode:'0',
@@ -316,6 +323,9 @@ class QQ:
                 newfeeds_uinlist:[]
             }
         }
+        这里只使用了myFeeds_new_cnt,所以让此函数只返回了这个值
+        如果想获得更加详细的feed数目，可以修改
+        :return: myFeeds_new_cnt, the number of new feeds about me
         """
         req = urllib.request.Request(
             url="https://user.qzone.qq.com/proxy/domain/ic2.qzone.qq.com"
@@ -327,7 +337,9 @@ class QQ:
         res = self.opener.open(req).read().decode().strip()[9:-1]
         return demjson.decode(res)['data']['myFeeds_new_cnt']
 
+    
     def re_feeds(self, host_uin, topic_id, comment_id, comment_uin, this_comment_uin, content):
+        #回复
         data = urllib.parse.urlencode(
             {"qzreferrer": "https://user.qzone.qq.com/" + str(self.qq_number),
              "topicId": topic_id,
@@ -356,6 +368,7 @@ class QQ:
         self.opener.open(req, data=data)
 
     def right(self):
+        #这是获取最近访客的，不写了。。。
         home_page = open("./home.html", 'r')
         qzonetoken = None
         token_pattern = re.compile("g_qzonetoken[^\"]*\"([^\"]*)\"")
@@ -384,9 +397,12 @@ class QQ:
         r = self.opener.open(right_frame).read().decode()
         print(r)
 
+        
     def do_like(self, unikey, curkey, how=True):
         """DOLIKE or UNLIKE a user's feed identified by unikey and curkey,
-        unikey and curkey are same if this feed was originally created by he"""
+        unikey and curkey are same if this feed was originally created by he
+        
+        """
         headers = {
             "Host": "user.qzone.qq.com",
             "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:56.0) Gecko/20100101 Firefox/56.0",
@@ -452,6 +468,8 @@ class QQ:
                           content=answer)
 
     def watch_dog(self, times=10, sleep_time=5):
+        #每sleep_time秒获取一次关于我的事件
+        #然后自动回复它们
         for i in range(times):
             count = self.get_feeds_count()
             # print(count)
@@ -464,6 +482,8 @@ class QQ:
         return re.search("callback\(({[^;]+})\);", text).group(1)
 
     def __get_g_tk(self):
+        #获取空间登录需要的gtk
+        #计算方法可以从JS脚本了查找到
         p_skey = None
         for i in self.qq_cookie:
             if i.name == "p_skey":
@@ -475,6 +495,8 @@ class QQ:
         return num & 2147483647
 
     def __get_login_sig(self):
+        #获取空间登录需要的login_sig
+        #
         login_sign_url = urllib.request.Request(
             url="https://xui.ptlogin2.qq.com/cgi-bin/xlogin"
                 "?proxy_url=https%3A//qzs.qq.com/qzone/v6/portal/proxy.html"
@@ -494,6 +516,7 @@ class QQ:
         raise RuntimeError("pt_login_sig Not Found")
 
     def __get_ptvf_session(self):
+        #从cookie里面获取空间登录需要的session
         # Get ptvfsession in cookie
         for i in self.qq_cookie:
             if i.name == "ptvfsession":
@@ -502,6 +525,9 @@ class QQ:
 
     def __get_p(self, verify_code):
         # Get p by Javascript
+        #计算得到加密后的密码
+        #算法可以分析Encryption.js脚本得到
+        #由于比较复杂，所以直接调用里面的js函数计算了
         encryption_js = open("./Encryption.js", 'r')
         text = ""
         line = encryption_js.readline()
@@ -514,10 +540,12 @@ class QQ:
         return p
 
     def __show_cookie(self):
+        #显示当前cookie中的内容
         for i in self.qq_cookie:
             print("%s:%s" % (i.name, i.value))
 
     def __get_qzonetoken(self, qq):
+        #获取空间登录需要的qzonetoken
         headers = {"Host": "user.qzone.qq.com",
                    "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:56.0) Gecko/20100101 Firefox/56.0",
                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
